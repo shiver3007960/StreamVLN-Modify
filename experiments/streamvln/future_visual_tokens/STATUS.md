@@ -6,14 +6,14 @@
 
 ```text
 stage: Stage 1 Predicted future 模块预训练
-status: running DDP/no-DeepSpeed on 48GPU allocation; step-500 eval and checkpoint-1000 validated
+status: completed DDP/no-DeepSpeed 48GPU Stage 1 run
 ```
 
 ## Checklist
 
 ```text
 Stage 0 代码接口确认: done
-Stage 1 Predicted future 模块预训练: running; validation gate passed
+Stage 1 Predicted future 模块预训练: done
 Stage 2 Future-aware action joint 微调: drafted
 Stage 3 Oracle / control 诊断: pending
 Stage 4 R2R pilot / medium eval: pending
@@ -31,8 +31,8 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-继续当前 48GPU Stage 1 predictor run。
-已确认 500/1000-step heldout eval loss 和 checkpoint-1000 写盘。
+基于当前 Stage 1 predictor checkpoint 做恢复检查或进入 Stage 2 joint 微调。
+allocation 6367298 仍处于 RUNNING，未自动释放。
 ```
 
 ## 当前运行
@@ -40,7 +40,7 @@ R2R val_unseen 8GPU eval:
 ```text
 run: streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023
 scale: full Stage 1 predictor pretrain
-status: running beyond step 1000; eval and checkpoint save validated
+status: completed 1 epoch
 job: allocation 6367298, eailab_system, 6 nodes / 48 GPUs
 artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023
 logs:
@@ -52,6 +52,12 @@ validated:
   step 500 eval_loss: 1.285919427871704
   step 1000 eval_loss: 1.274842381477356
   checkpoint-1000: present with trainer_state.json, optimizer.pt, scheduler.pt, 48 rng_state files, and 4 model safetensors shards
+final:
+  final checkpoint: checkpoint-4978
+  train_loss: 1.209248219019153
+  train_runtime: 7371.2115 sec
+  final saved checkpoints: checkpoint-4000, checkpoint-4978
+  eval trend: 1.2859 -> 1.2748 -> 1.2698 -> 1.2678 -> 1.2630 -> 1.2610 -> 1.2612 -> 1.2582 -> 1.2606
 launch config:
   deepspeed: disabled
   distributed: torchrun DDP
