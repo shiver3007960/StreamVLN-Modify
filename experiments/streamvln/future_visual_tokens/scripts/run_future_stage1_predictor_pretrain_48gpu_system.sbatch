@@ -82,9 +82,12 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_PROJECT=streamvln-future
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
+export MAX_JOBS=8
 
 srun --cpu-bind=none bash -lc "
   cd '${REPO_DIR}' &&
+  export TORCH_EXTENSIONS_DIR=/tmp/streamvln_torch_extensions_${SLURM_JOB_ID}_\${SLURM_NODEID} &&
+  mkdir -p \${TORCH_EXTENSIONS_DIR} &&
   '${REPO_DIR}/scripts/streamvln_container.sh' \
     torchrun --nnodes='${SLURM_NNODES}' --nproc_per_node=8 \
     --node_rank=\"\${SLURM_NODEID}\" \
@@ -107,6 +110,7 @@ srun --cpu-bind=none bash -lc "
     --future_pretrain_only True \
     --future_fusion False \
     --future_loss_weight 1.0 \
+    --future_eval_size 1024 \
     --mm_tunable_parts future_predictor \
     --vision_tower '${VISION_TOWER}' \
     --mm_projector_type mlp2x_gelu \
@@ -123,9 +127,11 @@ srun --cpu-bind=none bash -lc "
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
-    --evaluation_strategy no \
-    --save_strategy epoch \
-    --save_total_limit 1 \
+    --evaluation_strategy steps \
+    --eval_steps 500 \
+    --save_strategy steps \
+    --save_steps 1000 \
+    --save_total_limit 2 \
     --learning_rate 2e-4 \
     --weight_decay 0. \
     --warmup_ratio 0.075 \
