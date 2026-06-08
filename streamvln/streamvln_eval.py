@@ -66,6 +66,13 @@ class VLNEvaluator:
         with habitat.config.read_write(self.config):
             # self.config.habitat.task.measurements.success.success_distance=3.0
             self.config.habitat.dataset.split = self.split
+            habitat_gpu_device_id = os.environ.get("STREAMVLN_HABITAT_GPU_DEVICE_ID")
+            if habitat_gpu_device_id is None and args is not None:
+                habitat_gpu_device_id = str(getattr(args, "gpu", 0))
+            if habitat_gpu_device_id is not None:
+                self.config.habitat.simulator.habitat_sim_v0.gpu_device_id = int(
+                    habitat_gpu_device_id
+                )
             self.config.habitat.task.measurements.update(
                 {
                     "top_down_map": TopDownMapMeasurementConfig(
@@ -210,6 +217,7 @@ class VLNEvaluator:
                         spls.append(res['spl'])
                         oss.append(res['os'])
                         ones.append(res['ne'])
+        max_episodes = int(os.environ.get("STREAMVLN_MAX_EPISODES", "0"))
         for scene in sorted(scene_episode_dict.keys()):
             episodes = scene_episode_dict[scene]
             scene_id = scene.split('/')[-2]
@@ -375,6 +383,10 @@ class VLNEvaluator:
                 
                 with open(os.path.join(self.output_path, f'result.json'), 'a') as f:
                     f.write(json.dumps(result) + "\n")
+                if max_episodes > 0 and len(sucs) >= max_episodes:
+                    print(f"Reached STREAMVLN_MAX_EPISODES={max_episodes}; stopping eval early.")
+                    env.close()
+                    return torch.tensor(sucs).to(self.device), torch.tensor(spls).to(self.device), torch.tensor(oss).to(self.device), torch.tensor(ones).to(self.device), torch.tensor(len(sucs)).to(self.device)
 
         env.close()
         return torch.tensor(sucs).to(self.device), torch.tensor(spls).to(self.device), torch.tensor(oss).to(self.device), torch.tensor(ones).to(self.device), torch.tensor(len(sucs)).to(self.device)     
@@ -523,7 +535,7 @@ def eval():
     config = transformers.AutoConfig.from_pretrained(args.model_path)
     model = StreamVLNForCausalLM.from_pretrained(
                 args.model_path,
-                attn_implementation="flash_attention_2",
+                attn_implementation=os.environ.get("STREAMVLN_ATTENTION", "flash_attention_2"),
                 torch_dtype=torch.bfloat16,
                 config=config,
                 low_cpu_mem_usage=False,

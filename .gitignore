@@ -1,0 +1,22 @@
+# Python/cache artifacts
+__pycache__/
+*.py[cod]
+*.so
+
+# Local datasets and checkpoints
+data/
+checkpoints/
+
+# Experiment outputs
+logs/
+results/
+*.out
+*.err
+
+# Local runtime/vendor binaries copied for the cluster
+third_party/
+
+# Common local files
+.DS_Store
+.cache/
+.pytest_cache/
