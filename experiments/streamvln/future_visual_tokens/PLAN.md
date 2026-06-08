@@ -31,6 +31,16 @@ R2R val_unseen 8GPU eval:
 3. 明确 future module default-off，不影响原始 eval。
 ```
 
+数据策略：
+
+```text
+不额外构建新数据集。
+VLNActionDataset 从同一 trajectory 的 rgb 帧序列中读取监督帧：
+  input: 当前采样帧 t
+  target: 同一轨迹、同一相机视角、同一预处理下的 t+4 rgb 帧
+  invalid: 轨迹末尾越界 target 只用于 padding，不计入 future loss
+```
+
 验证：
 
 ```text
@@ -53,6 +63,24 @@ R2R val_unseen 8GPU eval:
 2. 输出 196 个 predicted future tokens，和一张图像的 14x14 token 数一致。
 3. target 为未来帧经过 StreamVLN vision tower/projector/pooling 后的 196 tokens，target detach。
 4. 冻结 StreamVLN 主体，优先只训练 future predictor / target loss。
+```
+
+训练超参：
+
+```text
+epoch: 1
+lr: 2e-4
+batch: per_device_train_batch_size 2, gradient_accumulation_steps 2
+warmup_ratio: 0.075
+scheduler: cosine
+future_loss_weight: 1.0
+wandb: report_to wandb, project streamvln-future
+
+依据:
+  原 StreamVLN stage1 也是 1 epoch；
+  原主模型 LR 为 2e-5；
+  future predictor 是随机初始化小模块，因此预训练 LR 取 10x，即 2e-4；
+  warmup/batch 继承原 stage1 配置。
 ```
 
 验证：
@@ -93,6 +121,24 @@ future token count: 196
 horizon: t+4 优先
 fusion: current_tokens <- cross-attn(future_tokens) + gate
 trainable: future predictor / fusion / LoRA / mm_projector，避免全参 2GPU OOM
+```
+
+训练超参：
+
+```text
+epoch: 1
+lr: 2e-5
+batch: per_device_train_batch_size 1, gradient_accumulation_steps 4
+warmup_ratio: 0.075
+scheduler: cosine
+future_loss_weight: 0.1
+lora: r=8, alpha=16, dropout=0.05
+wandb: report_to wandb, project streamvln-future
+
+依据:
+  action joint 阶段已经进入 LLM/VLM 行为微调，LR 回到原 StreamVLN stage1 的 2e-5；
+  196 future tokens 会增加显存，所以先把 per-device batch 降到 1，并用 grad accumulation 保持有效 batch；
+  future loss 只作为辅助约束，先设 0.1，避免压过 action CE。
 ```
 
 验证：
@@ -179,6 +225,10 @@ future controls 证明模型实际依赖 future；
 
 可复用脚本:
   experiments/streamvln/future_visual_tokens/scripts/
+
+Stage 1/2 训练脚本:
+  experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_8gpu.sbatch
+  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu.sbatch
 
 小日志:
   experiments/streamvln/future_visual_tokens/logs/<run>/

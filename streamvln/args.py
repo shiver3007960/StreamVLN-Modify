@@ -63,6 +63,14 @@ class ModelArguments:
     add_faster_video: Optional[bool] = field(default=False)
     faster_token_stride: Optional[int] = field(default=10)
 
+    use_future_tokens: bool = field(default=False)
+    future_token_count: int = field(default=196)
+    future_qformer_depth: int = field(default=2)
+    future_qformer_heads: int = field(default=8)
+    future_loss_weight: float = field(default=1.0)
+    future_pretrain_only: bool = field(default=False)
+    future_fusion: bool = field(default=True)
+
 
 @dataclass
 class DataArguments:
@@ -93,6 +101,7 @@ class DataArguments:
     transform_train: Optional[str] = field(default=None)
     image_size: Optional[int] = field(default=384)
     remove_init_turns: Optional[bool] = field(default=False)
+    future_target_offset: Optional[int] = field(default=4)
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):

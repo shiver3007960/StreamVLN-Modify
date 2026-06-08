@@ -54,6 +54,8 @@ future target 使用 StreamVLN 自身视觉编码路径产生的未来帧特征�
 
 第一版直接训练 predicted future 模块，不先做 oracle future。oracle future 放到后续诊断中，用来判断失败来自 future 预测质量还是注入/消费路径。
 
+监督帧不另建数据集，直接从原 StreamVLN trajectory `rgb` 序列中取当前采样帧 `t` 后移 4 step 的 `t+4` 图像。它和原当前观测使用同一轨迹、同一相机视角、同一图像预处理，只改变时间索引。
+
 ## 不做的声明
 
 本实验第一版不声称：

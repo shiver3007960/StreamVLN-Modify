@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from math import ceil
 from typing import List, Optional, Union, Tuple
 
@@ -10,6 +11,67 @@ from transformers import Qwen2ForCausalLM
 from llava.model.language_model.llava_qwen import LlavaQwenModel
 from llava.model.llava_arch import LlavaMetaForCausalLM
 from utils.utils import IGNORE_INDEX, IMAGE_TOKEN_INDEX, MEMORY_TOKEN_INDEX
+
+
+class FutureQueryBlock(nn.Module):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4):
+        super().__init__()
+        self.query_norm = nn.LayerNorm(hidden_size)
+        self.context_norm = nn.LayerNorm(hidden_size)
+        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, hidden_size * mlp_ratio),
+            nn.GELU(),
+            nn.Linear(hidden_size * mlp_ratio, hidden_size),
+        )
+
+    def forward(self, queries, context):
+        attn_out, _ = self.attn(
+            self.query_norm(queries),
+            self.context_norm(context),
+            self.context_norm(context),
+            need_weights=False,
+        )
+        queries = queries + attn_out
+        queries = queries + self.ffn(queries)
+        return queries
+
+
+class FutureVisualPredictor(nn.Module):
+    def __init__(self, hidden_size, num_tokens=196, depth=2, num_heads=8):
+        super().__init__()
+        self.future_queries = nn.Parameter(torch.randn(num_tokens, hidden_size) * 0.02)
+        self.blocks = nn.ModuleList(
+            [FutureQueryBlock(hidden_size, num_heads) for _ in range(depth)]
+        )
+        self.out_norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, context):
+        queries = self.future_queries.unsqueeze(0).expand(context.shape[0], -1, -1)
+        for block in self.blocks:
+            queries = block(queries, context)
+        return self.out_norm(queries)
+
+
+class FutureToCurrentFusion(nn.Module):
+    def __init__(self, hidden_size, num_heads=8):
+        super().__init__()
+        self.current_norm = nn.LayerNorm(hidden_size)
+        self.future_norm = nn.LayerNorm(hidden_size)
+        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.gate = nn.Parameter(torch.tensor(-2.0))
+        self.out_norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, current_tokens, future_tokens):
+        fused, _ = self.attn(
+            self.current_norm(current_tokens),
+            self.future_norm(future_tokens),
+            self.future_norm(future_tokens),
+            need_weights=False,
+        )
+        return self.out_norm(current_tokens + torch.sigmoid(self.gate) * fused)
+
 
 class StreamVLNModel(LlavaQwenModel):
     def __init__(
@@ -43,6 +105,21 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         self.model = StreamVLNModel(config, **kwargs)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.use_future_tokens = getattr(config, "use_future_tokens", False)
+        if self.use_future_tokens:
+            future_token_count = getattr(config, "future_token_count", 196)
+            future_depth = getattr(config, "future_qformer_depth", 2)
+            future_heads = getattr(config, "future_qformer_heads", 8)
+            self.future_predictor = FutureVisualPredictor(
+                config.hidden_size,
+                num_tokens=future_token_count,
+                depth=future_depth,
+                num_heads=future_heads,
+            )
+            if getattr(config, "future_fusion", True):
+                self.future_fusion = FutureToCurrentFusion(config.hidden_size, future_heads)
+            else:
+                self.future_fusion = None
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -140,16 +217,81 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             image_features_.append(image_feature)
         image_features = image_features_
         return image_features, memory_features
+
+    def encode_future_rgb(self, future_images):
+        batch_size, num_view, _, _, _ = future_images.shape
+        future_features = self.get_model().get_vision_tower()(future_images.flatten(0, 1))
+        future_features = self.get_model().mm_projector(future_features)
+        future_features = self.get_2dPool(future_features, 2)
+        return future_features.view(batch_size, num_view, future_features.shape[1], future_features.shape[2])
+
+    def apply_future_prediction(self, image_features, memory_features, future_images=None, future_valid=None):
+        if not getattr(self, "use_future_tokens", False):
+            return image_features, None
+
+        future_targets = None
+        if future_images is not None:
+            with torch.no_grad():
+                future_targets = self.encode_future_rgb(future_images).detach()
+
+        future_losses = []
+        fused_image_features = []
+        for batch_idx, cur_image_features in enumerate(image_features):
+            cur_fused = []
+            for img_idx, cur_image_feature in enumerate(cur_image_features):
+                context_parts = []
+                cur_memory_feature = memory_features[batch_idx]
+                if cur_memory_feature is not None:
+                    context_parts.append(cur_memory_feature.squeeze(0))
+                context_parts.append(cur_image_feature)
+                context = torch.cat(context_parts, dim=0).unsqueeze(0)
+                predicted_future = self.future_predictor(context).squeeze(0)
+
+                if future_targets is not None and img_idx < future_targets.shape[1]:
+                    valid = 1.0
+                    if future_valid is not None:
+                        valid = future_valid[batch_idx, img_idx].to(predicted_future.device)
+                    if valid.item() > 0:
+                        target = future_targets[batch_idx, img_idx].to(predicted_future.device)
+                        mse_loss = F.mse_loss(predicted_future.float(), target.float())
+                        cosine_loss = 1.0 - F.cosine_similarity(
+                            predicted_future.float(),
+                            target.float(),
+                            dim=-1,
+                        ).mean()
+                        future_losses.append(mse_loss + cosine_loss)
+
+                if getattr(self.config, "future_fusion", True) and self.future_fusion is not None:
+                    cur_image_feature = self.future_fusion(
+                        cur_image_feature.unsqueeze(0),
+                        predicted_future.unsqueeze(0),
+                    ).squeeze(0)
+                cur_fused.append(cur_image_feature)
+            fused_image_features.append(torch.stack(cur_fused, dim=0))
+
+        future_loss = None
+        if len(future_losses) > 0:
+            future_loss = torch.stack(future_losses).mean()
+        elif future_targets is not None:
+            future_loss = next(self.future_predictor.parameters()).sum() * 0.0
+        return fused_image_features, future_loss
    
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels, 
-        images, image_sizes, depths, poses, intrinsics, time_ids=None, task_ids=None
+        images, image_sizes, depths, poses, intrinsics, time_ids=None, task_ids=None,
+        future_images=None, future_valid=None
     ):  
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         image_features, memory_features = self.encode_rgbd(images, depths, poses, intrinsics, time_ids, task_ids)
+        image_features, future_loss = self.apply_future_prediction(
+            image_features,
+            memory_features,
+            future_images=future_images,
+            future_valid=future_valid,
+        )
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):
@@ -288,7 +430,7 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         if _position_ids is None:
             position_ids = None
 
-        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, future_loss
     
     def forward(
         self,
@@ -314,6 +456,9 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         input_ids_ = input_ids
         time_ids = kwargs.get("time_ids", None)
         task_ids = kwargs.get("task_type", None)
+        future_images = kwargs.get("future_images", None)
+        future_valid = kwargs.get("future_valid", None)
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         if inputs_embeds is None:
             (
                 input_ids,
@@ -321,7 +466,8 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 past_key_values,
                 inputs_embeds,
-                labels
+                labels,
+                future_loss
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -334,10 +480,22 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 poses, 
                 intrinsics,
                 time_ids,
-                task_ids
+                task_ids,
+                future_images,
+                future_valid,
             )
-    
-        return super().forward(
+        else:
+            future_loss = None
+
+        if getattr(self.config, "future_pretrain_only", False):
+            weighted_future_loss = future_loss
+            if weighted_future_loss is not None:
+                weighted_future_loss = weighted_future_loss * getattr(self.config, "future_loss_weight", 1.0)
+            if return_dict:
+                return CausalLMOutputWithPast(loss=weighted_future_loss)
+            return (weighted_future_loss,)
+
+        outputs = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -349,6 +507,13 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
         )
+        if future_loss is not None:
+            weighted_future_loss = future_loss * getattr(self.config, "future_loss_weight", 1.0)
+            if return_dict:
+                outputs.loss = outputs.loss + weighted_future_loss if outputs.loss is not None else weighted_future_loss
+            elif len(outputs) > 0:
+                outputs = (outputs[0] + weighted_future_loss,) + outputs[1:]
+        return outputs
     
     @torch.no_grad()
     def generate(
@@ -375,6 +540,7 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 _,
                 inputs_embeds,
+                _,
                 _
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
@@ -388,7 +554,7 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 poses,
                 intrinsics,
                 time_ids,
-                task_ids
+                task_ids,
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)

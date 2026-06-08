@@ -622,6 +622,7 @@ class VLNActionDataset(Dataset):
         self.num_frames = data_args.num_frames
         self.num_history = data_args.num_history
         self.num_future_steps = data_args.num_future_steps
+        self.future_target_offset = data_args.future_target_offset
         self.remove_init_turns = data_args.remove_init_turns
 
         self.video_folder = data_args.video_folder.split(',')
@@ -749,6 +750,10 @@ class VLNActionDataset(Dataset):
         start_idx, end_idx, interval = time_ids[0]+valid_idx, time_ids[-1]+1+valid_idx, self.num_future_steps
         sample_step_ids = np.arange(start_idx, end_idx, interval, dtype=np.int32)
         sample_frames = [os.path.join(video_path, 'rgb', video_frames[i]) for i in sample_step_ids]
+        future_step_ids = sample_step_ids + self.future_target_offset
+        future_valid = future_step_ids < len(video_frames)
+        future_step_ids = np.clip(future_step_ids, 0, len(video_frames) - 1)
+        future_frames = [os.path.join(video_path, 'rgb', video_frames[i]) for i in future_step_ids]
 
         if time_ids[0] != 0:
             history_step_ids = np.arange(0+valid_idx, time_ids[0]+valid_idx, max(time_ids[0] // self.num_history, 1))
@@ -766,6 +771,15 @@ class VLNActionDataset(Dataset):
             images.append(image)
 
         images = torch.stack(images)
+        future_images = []
+        for image_file in future_frames:
+            image = Image.open(image_file).convert('RGB')
+            if self.transforms is not None:
+                image = self.transforms(image)
+
+            image = self.image_processor.preprocess(images=image, return_tensors='pt')['pixel_values'][0]
+            future_images.append(image)
+        future_images = torch.stack(future_images)
         
         sources = copy.deepcopy(self.conversations)
 
@@ -780,6 +794,8 @@ class VLNActionDataset(Dataset):
         return data_dict["input_ids"][0], \
             data_dict["labels"][0], \
             images, \
+            future_images, \
+            torch.tensor(future_valid, dtype=torch.float32), \
             torch.tensor(time_ids), \
             self.task
 
@@ -802,7 +818,11 @@ def pad_tensors(tensors, lens=None, max_len=None, pad=0):
     return output
 
 def collate_fn(batch, tokenizer):
-    input_ids_batch, labels_batch, image_batch, time_ids_batch, task_type_batch = zip(*batch)
+    if len(batch[0]) == 7:
+        input_ids_batch, labels_batch, image_batch, future_image_batch, future_valid_batch, time_ids_batch, task_type_batch = zip(*batch)
+    else:
+        input_ids_batch, labels_batch, image_batch, time_ids_batch, task_type_batch = zip(*batch)
+        future_image_batch, future_valid_batch = None, None
     input_ids_batch = pad_sequence(input_ids_batch, batch_first=True, padding_value=tokenizer.pad_token_id)
     labels_batch = pad_sequence(labels_batch, batch_first=True, padding_value=IGNORE_INDEX)
     
@@ -816,10 +836,15 @@ def collate_fn(batch, tokenizer):
         time_ids_batch = pad_sequence(time_ids_batch, batch_first=True, padding_value=-1)
     
     image_batch = pad_tensors(image_batch, img_lens)
-    
-    return {'images': image_batch, 
+
+    batch_dict = {'images': image_batch, 
             'time_ids': time_ids_batch, 
             'attention_mask': attention_mask, 
             'input_ids': input_ids_batch, 
             'labels': labels_batch, 
             'task_type': task_type_batch}
+    if future_image_batch is not None:
+        future_img_lens = np.array([i.size(0) for i in future_image_batch])
+        batch_dict['future_images'] = pad_tensors(future_image_batch, future_img_lens)
+        batch_dict['future_valid'] = pad_sequence(future_valid_batch, batch_first=True, padding_value=0)
+    return batch_dict

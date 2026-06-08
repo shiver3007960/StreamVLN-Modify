@@ -1518,6 +1518,13 @@ def get_model(model_args, training_args, data_args, bnb_model_from_pretrained_ar
         overwrite_config["num_future_steps"] = data_args.num_future_steps
     if data_args.num_history:
         overwrite_config["num_history"] = data_args.num_history
+    overwrite_config["use_future_tokens"] = model_args.use_future_tokens
+    overwrite_config["future_token_count"] = model_args.future_token_count
+    overwrite_config["future_qformer_depth"] = model_args.future_qformer_depth
+    overwrite_config["future_qformer_heads"] = model_args.future_qformer_heads
+    overwrite_config["future_loss_weight"] = model_args.future_loss_weight
+    overwrite_config["future_pretrain_only"] = model_args.future_pretrain_only
+    overwrite_config["future_fusion"] = model_args.future_fusion
         
     if model_args.mm_tunable_parts:
         overwrite_config["mm_tunable_parts"] = model_args.mm_tunable_parts
@@ -1767,6 +1774,14 @@ def train(attn_implementation=None):
             if "mm_lora_layer" in tunable_parts:
                 for name, param in model.named_parameters():
                     if "lora" in name:
+                        param.requires_grad_(True)
+            if "future_predictor" in tunable_parts:
+                for name, param in model.named_parameters():
+                    if "future_predictor" in name:
+                        param.requires_grad_(True)
+            if "future_fusion" in tunable_parts:
+                for name, param in model.named_parameters():
+                    if "future_fusion" in name:
                         param.requires_grad_(True)
         
         for name, param in model.named_parameters():
