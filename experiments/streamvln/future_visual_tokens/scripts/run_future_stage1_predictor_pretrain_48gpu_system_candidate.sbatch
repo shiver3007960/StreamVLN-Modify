@@ -121,6 +121,7 @@ export NCCL_IB_DISABLE=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_PROJECT=streamvln-future
 export WANDB_NAME="${RUN_NAME}"
+export WANDB_MODE="${WANDB_MODE:-offline}"
 
 "${REPO_DIR}/scripts/streamvln_container.sh" \
   torchrun --nnodes="${TARGET_NODES}" --nproc_per_node=8 \

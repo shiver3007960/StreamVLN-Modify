@@ -81,6 +81,7 @@ export NCCL_IB_DISABLE=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_PROJECT=streamvln-future
 export WANDB_NAME="${RUN_NAME}"
+export WANDB_MODE="${WANDB_MODE:-offline}"
 
 srun --cpu-bind=none bash -lc "
   cd '${REPO_DIR}' &&
