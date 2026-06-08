@@ -5,15 +5,15 @@
 ## 当前阶段
 
 ```text
-stage: planning
-status: implementation drafted
+stage: Stage 1 Predicted future 模块预训练
+status: running
 ```
 
 ## Checklist
 
 ```text
 Stage 0 代码接口确认: done
-Stage 1 Predicted future 模块预训练: drafted
+Stage 1 Predicted future 模块预训练: running
 Stage 2 Future-aware action joint 微调: drafted
 Stage 3 Oracle / control 诊断: pending
 Stage 4 R2R pilot / medium eval: pending
@@ -31,8 +31,23 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-先做语法和小 batch shape smoke。
-通过后提交代码，再跑 2GPU smoke 验证训练/保存/resume。
+等待 Stage 1 predictor 预训练到 checkpoint-1000，并确认 500-step heldout eval loss。
+如果训练稳定，后续用该 predictor checkpoint 启动 Stage 2 joint 微调。
+```
+
+## 当前运行
+
+```text
+run: streamvln-future-s1-48g-6364948
+scale: full Stage 1 predictor pretrain
+status: running; 已打出首条 train loss=3.8243
+job: 6364948, eailab_system, 6 nodes / 48 GPUs
+artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-6364948
+logs:
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-6364948.out
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-6364948.err
+eval: future_eval_size=1024, eval_steps=500
+save: save_steps=1000, save_total_limit=2
 ```
 
 ## 已整合脚本
@@ -42,6 +57,7 @@ experiments/streamvln/future_visual_tokens/scripts/run_baseline_r2r_single_gpu_s
 experiments/streamvln/future_visual_tokens/scripts/run_baseline_r2r_val_unseen_8gpu_eval.sbatch
 experiments/streamvln/future_visual_tokens/scripts/run_baseline_train_2gpu_save_resume_smoke.sbatch
 experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_8gpu.sbatch
+experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_48gpu_system.sbatch
 experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu.sbatch
 ```
 
