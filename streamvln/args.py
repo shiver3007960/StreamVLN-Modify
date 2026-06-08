@@ -102,6 +102,7 @@ class DataArguments:
     image_size: Optional[int] = field(default=384)
     remove_init_turns: Optional[bool] = field(default=False)
     future_target_offset: Optional[int] = field(default=4)
+    future_eval_size: Optional[int] = field(default=0)
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):

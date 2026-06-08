@@ -43,7 +43,7 @@ import transformers
 import tokenizers
 
 from transformers import AutoConfig
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN, IMAGE_TOKEN_INDEX
 from llava.train.llava_trainer import LLaVATrainer
 
@@ -1438,6 +1438,13 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,visi
     """Make dataset and collator for supervised fine-tuning."""
     
     nav_dataset = VLNActionDataset(tokenizer=tokenizer, data_args=data_args, task_id=0)
+    eval_dataset = None
+    future_eval_size = max(int(getattr(data_args, "future_eval_size", 0) or 0), 0)
+    if future_eval_size > 0 and len(nav_dataset) > future_eval_size:
+        split_at = len(nav_dataset) - future_eval_size
+        eval_dataset = Subset(nav_dataset, range(split_at, len(nav_dataset)))
+        nav_dataset = Subset(nav_dataset, range(0, split_at))
+        rank0_print('len future_eval_dataset ', len(eval_dataset))
     dataset =[nav_dataset]
     
     if data_args.multi_task_training:
@@ -1460,7 +1467,7 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,visi
     rank0_print('len train_dataset ', len(train_dataset))
 
     data_collator = partial(collate_fn, tokenizer=tokenizer)
-    return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
+    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
 
 
 def get_model(model_args, training_args, data_args, bnb_model_from_pretrained_args):
@@ -1558,6 +1565,17 @@ def train(attn_implementation=None):
     
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    if model_args.use_future_tokens and model_args.future_pretrain_only:
+        if not getattr(data_args, "future_eval_size", 0):
+            data_args.future_eval_size = 1024
+        if str(training_args.evaluation_strategy).lower().endswith("no"):
+            from transformers.trainer_utils import IntervalStrategy
+            training_args.evaluation_strategy = IntervalStrategy.STEPS
+            if hasattr(training_args, "eval_strategy"):
+                training_args.eval_strategy = IntervalStrategy.STEPS
+            training_args.do_eval = True
+            training_args.eval_steps = training_args.eval_steps or 500
 
     if training_args.verbose_logging:
         rank0_print(f"Inspecting experiment hyperparameters:\n")
