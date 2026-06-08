@@ -93,7 +93,7 @@ srun -N "${SLURM_NNODES}" --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 --cpu-b
     --node_rank=\"\${SLURM_NODEID}\" \
     --master_addr='${MASTER_ADDR}' --master_port='${MASTER_PORT}' \
     streamvln/streamvln_train.py \
-    --deepspeed scripts/zero2.json \
+    --deepspeed scripts/zero2_future_predictor.json \
     --model_name_or_path '${MODEL_PATH}' \
     --version qwen_1_5 \
     --video_folder '${VIDEO_FOLDER}' \
@@ -124,9 +124,9 @@ srun -N "${SLURM_NNODES}" --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 --cpu-b
     --run_name '${RUN_NAME}' \
     --output_dir '${OUT_DIR}' \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 2 \
     --evaluation_strategy steps \
     --eval_steps 500 \
     --save_strategy steps \
@@ -138,7 +138,7 @@ srun -N "${SLURM_NNODES}" --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 --cpu-b
     --lr_scheduler_type cosine \
     --logging_steps 10 \
     --model_max_length 32768 \
-    --gradient_checkpointing True \
+    --gradient_checkpointing False \
     --dataloader_num_workers 8 \
     --lazy_preprocess True \
     --dataloader_drop_last True \

@@ -6,14 +6,14 @@
 
 ```text
 stage: Stage 1 Predicted future 模块预训练
-status: running
+status: retrying after NCCL timeout
 ```
 
 ## Checklist
 
 ```text
 Stage 0 代码接口确认: done
-Stage 1 Predicted future 模块预训练: running
+Stage 1 Predicted future 模块预训练: retrying
 Stage 2 Future-aware action joint 微调: drafted
 Stage 3 Oracle / control 诊断: pending
 Stage 4 R2R pilot / medium eval: pending
@@ -31,8 +31,8 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-等待 Stage 1 predictor 预训练到 checkpoint-1000，并确认 500-step heldout eval loss。
-如果训练稳定，后续用该 predictor checkpoint 启动 Stage 2 joint 微调。
+重投单 48GPU Stage 1 predictor 任务。
+必须确认 500-step heldout eval loss 和 checkpoint-1000 写盘。
 ```
 
 ## 当前运行
@@ -40,7 +40,7 @@ R2R val_unseen 8GPU eval:
 ```text
 run: streamvln-future-s1-48g-6364948
 scale: full Stage 1 predictor pretrain
-status: running; 已打出首条 train loss=3.8243
+status: failed; step 20 左右 NCCL ALLREDUCE timeout
 job: 6364948, eailab_system, 6 nodes / 48 GPUs
 artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-6364948
 logs:
@@ -48,6 +48,12 @@ logs:
   experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-6364948.err
 eval: future_eval_size=1024, eval_steps=500
 save: save_steps=1000, save_total_limit=2
+next retry:
+  deepspeed: scripts/zero2_future_predictor.json
+  reduce/allgather bucket: 25M
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 2
+  gradient_checkpointing: False
 ```
 
 ## 已整合脚本

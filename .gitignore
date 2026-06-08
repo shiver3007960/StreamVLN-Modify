@@ -10,6 +10,7 @@ checkpoints/
 # Experiment outputs
 logs/
 results/
+wandb/
 *.out
 *.err
 
