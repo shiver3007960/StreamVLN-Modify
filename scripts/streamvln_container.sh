@@ -86,7 +86,9 @@ for env_name in \
   WANDB_PROJECT \
   WANDB_NAME \
   WANDB_MODE \
-  WANDB_DIR; do
+  WANDB_DIR \
+  TORCH_EXTENSIONS_DIR \
+  MAX_JOBS; do
   if [[ -n "${!env_name:-}" ]]; then
     export "APPTAINERENV_${env_name}=${!env_name}"
   fi

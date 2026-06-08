@@ -123,6 +123,9 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export WANDB_PROJECT=streamvln-future
 export WANDB_NAME="${RUN_NAME}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
+export TORCH_EXTENSIONS_DIR="/tmp/streamvln_torch_extensions_${RUN_GROUP}_${NODE_RANK}"
+export MAX_JOBS=8
+mkdir -p "${TORCH_EXTENSIONS_DIR}"
 
 "${REPO_DIR}/scripts/streamvln_container.sh" \
   torchrun --nnodes="${TARGET_NODES}" --nproc_per_node=8 \
@@ -146,6 +149,7 @@ export WANDB_MODE="${WANDB_MODE:-offline}"
   --future_pretrain_only True \
   --future_fusion False \
   --future_loss_weight 1.0 \
+  --future_eval_size 1024 \
   --mm_tunable_parts future_predictor \
   --vision_tower "${VISION_TOWER}" \
   --mm_projector_type mlp2x_gelu \
@@ -162,9 +166,11 @@ export WANDB_MODE="${WANDB_MODE:-offline}"
   --per_device_train_batch_size 2 \
   --per_device_eval_batch_size 4 \
   --gradient_accumulation_steps 1 \
-  --evaluation_strategy no \
-  --save_strategy epoch \
-  --save_total_limit 1 \
+  --evaluation_strategy steps \
+  --eval_steps 500 \
+  --save_strategy steps \
+  --save_steps 1000 \
+  --save_total_limit 2 \
   --learning_rate 2e-4 \
   --weight_decay 0. \
   --warmup_ratio 0.075 \
