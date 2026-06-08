@@ -84,7 +84,7 @@ export WANDB_NAME="${RUN_NAME}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 export MAX_JOBS=8
 
-srun --cpu-bind=none bash -lc "
+srun -N "${SLURM_NNODES}" --ntasks="${SLURM_NNODES}" --ntasks-per-node=1 --cpu-bind=none bash -lc "
   cd '${REPO_DIR}' &&
   export TORCH_EXTENSIONS_DIR=/tmp/streamvln_torch_extensions_${SLURM_JOB_ID}_\${SLURM_NODEID} &&
   mkdir -p \${TORCH_EXTENSIONS_DIR} &&
