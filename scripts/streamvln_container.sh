@@ -80,7 +80,13 @@ for env_name in \
   NCCL_P2P_DISABLE \
   NCCL_IB_DISABLE \
   NCCL_SOCKET_IFNAME \
-  CUDA_DEVICE_ORDER; do
+  CUDA_DEVICE_ORDER \
+  WANDB_API_KEY \
+  WANDB_ENTITY \
+  WANDB_PROJECT \
+  WANDB_NAME \
+  WANDB_MODE \
+  WANDB_DIR; do
   if [[ -n "${!env_name:-}" ]]; then
     export "APPTAINERENV_${env_name}=${!env_name}"
   fi
