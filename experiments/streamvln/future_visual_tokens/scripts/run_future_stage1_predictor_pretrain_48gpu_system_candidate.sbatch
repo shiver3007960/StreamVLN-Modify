@@ -13,9 +13,10 @@
 set -euo pipefail
 
 REPO_DIR=/mnt/hwfile/lizhen/StreamVLN
-TARGET_NODES=6
+TARGET_NODES="${STREAMVLN_TARGET_NODES:-6}"
+TARGET_GPUS=$((TARGET_NODES * 8))
 RUN_GROUP="${STREAMVLN_FUTURE_RUN_ID:?Set STREAMVLN_FUTURE_RUN_ID for stitched candidates}"
-RUN_NAME="streamvln-future-s1-48g-${RUN_GROUP}"
+RUN_NAME="streamvln-future-s1-${TARGET_GPUS}g-${RUN_GROUP}"
 EXP_DIR="${REPO_DIR}/experiments/streamvln/future_visual_tokens"
 LOG_DIR="${EXP_DIR}/logs/${SLURM_JOB_NAME}-${SLURM_JOB_ID}"
 OUT_DIR="/mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/${RUN_NAME}"
