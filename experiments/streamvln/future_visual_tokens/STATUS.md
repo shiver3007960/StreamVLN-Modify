@@ -6,14 +6,14 @@
 
 ```text
 stage: Stage 1 Predicted future 模块预训练
-status: retrying after NCCL timeout
+status: running DDP/no-DeepSpeed on 48GPU allocation; step-500 eval and checkpoint-1000 validated
 ```
 
 ## Checklist
 
 ```text
 Stage 0 代码接口确认: done
-Stage 1 Predicted future 模块预训练: retrying
+Stage 1 Predicted future 模块预训练: running; validation gate passed
 Stage 2 Future-aware action joint 微调: drafted
 Stage 3 Oracle / control 诊断: pending
 Stage 4 R2R pilot / medium eval: pending
@@ -31,29 +31,38 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-重投单 48GPU Stage 1 predictor 任务。
-必须确认 500-step heldout eval loss 和 checkpoint-1000 写盘。
+继续当前 48GPU Stage 1 predictor run。
+已确认 500/1000-step heldout eval loss 和 checkpoint-1000 写盘。
 ```
 
 ## 当前运行
 
 ```text
-run: streamvln-future-s1-48g-6364948
+run: streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023
 scale: full Stage 1 predictor pretrain
-status: failed; step 20 左右 NCCL ALLREDUCE timeout
-job: 6364948, eailab_system, 6 nodes / 48 GPUs
-artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-6364948
+status: running beyond step 1000; eval and checkpoint save validated
+job: allocation 6367298, eailab_system, 6 nodes / 48 GPUs
+artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023
 logs:
-  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-6364948.out
-  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-6364948.err
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023/train.out
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023/train.err
 eval: future_eval_size=1024, eval_steps=500
 save: save_steps=1000, save_total_limit=2
-next retry:
-  deepspeed: scripts/zero2_future_predictor.json
-  reduce/allgather bucket: 25M
+validated:
+  step 500 eval_loss: 1.285919427871704
+  step 1000 eval_loss: 1.274842381477356
+  checkpoint-1000: present with trainer_state.json, optimizer.pt, scheduler.pt, 48 rng_state files, and 4 model safetensors shards
+launch config:
+  deepspeed: disabled
+  distributed: torchrun DDP
+  ddp_find_unused_parameters: True
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 2
   gradient_checkpointing: False
+previous failed run:
+  streamvln-future-s1-48g-6364948 failed around step 20 with NCCL ALLREDUCE timeout.
+  streamvln-future-s1-48g-alloc6367298-20260608-221805 reached tqdm 0/4978 but did not advance to first loss; cancelled inside allocation.
+  streamvln-future-s1-48g-alloc6367298-ddp-20260608-224902 failed quickly because DDP had unused trainable future_predictor params with find_unused_parameters=False.
 ```
 
 ## 已整合脚本

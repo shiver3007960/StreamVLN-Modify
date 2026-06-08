@@ -13,6 +13,7 @@ results/
 wandb/
 *.out
 *.err
+batchscript-*
 
 # Local runtime/vendor binaries copied for the cluster
 third_party/
