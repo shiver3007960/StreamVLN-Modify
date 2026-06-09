@@ -5,8 +5,8 @@
 ## 当前阶段
 
 ```text
-stage: gated future baseline eval completed; entering failure diagnosis
-status: wait for cleanup/push, then run no-future continuation control and direct-cat future baseline
+stage: failure diagnosis / direct-cat future baseline
+status: no-future continuation control running; direct-cat smoke passed
 ```
 
 ## Checklist
@@ -16,8 +16,8 @@ Stage 0 代码接口确认: done
 Stage 1 future_predictor 预训练: done
 Stage 2 gated fusion joint 微调: done
 Stage 3 R2R val_unseen eval: done
-Stage 4 失败原因排查: pending
-Stage 5 direct-cat future baseline: pending
+Stage 4 失败原因排查: running
+Stage 5 direct-cat future baseline: smoke done
 ```
 
 ## 当前结论
@@ -61,14 +61,15 @@ Stage 2 trainer state / proxy eval loss:
 ## 下一步
 
 ```text
-1. 清理冗余临时文件，只保留必要脚本、文档和可复现日志指针。
-2. 推送当前版本到 GitHub。
-3. 写并 smoke no-future old-data continuation control：
-   official ckpt + old trajectory data + LoRA + 1 epoch protocol。
-4. smoke 通过后，用 48GPU 跑 no-future control full run。
-5. 实现 direct-cat future baseline：
-   current visual tokens 后追加 future marker + predicted future tokens + future type embedding。
-6. direct-cat 用 32GPU 跑 1 epoch，total batch 尽量和 48GPU no-future control 对齐。
+1. no-future old-data continuation control 正在 48GPU allocation 6367298 上运行：
+   run: streamvln-no-future-cont-48g-alloc6367298-20260609-191202
+   output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-no-future-cont-48g-alloc6367298-20260609-191202
+   current evidence: 已保存 checkpoint-1000 / checkpoint-2000 / checkpoint-3000。
+2. direct-cat future baseline 已通过 8GPU smoke：
+   run: streamvln-future-cat-smoke-6387718
+   output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-smoke-6387718
+   evidence: checkpoint-10 global_step=10, checkpoint-12 global_step=12, resume OK。
+3. 下一步：等待 no-future control 完成或进入可安全评估状态，然后按 PLAN 启动 32GPU direct-cat full run。
 ```
 
 ## 排查假设
@@ -94,14 +95,15 @@ oracle future / shuffle future 等诊断放到下一轮。
 已实现:
   streamvln/dataset/vln_action_dataset.py: future_images / future_valid
   streamvln/model/stream_video_vln.py: FutureVisualPredictor / FutureToCurrentFusion / future loss
+  streamvln/model/stream_video_vln.py: direct-cat future marker/type embedding
   streamvln/args.py: future 相关参数
   streamvln/streamvln_train.py: future 模块解冻与训练保存
+  streamvln/streamvln_train.py: LoRA resume active_adapters compatibility patch
   streamvln/streamvln_eval.py: 支持 PEFT adapter + non_lora_trainables eval 加载
 
-待实现:
-  no-future continuation control launcher
-  direct-cat future marker/type embedding
-  direct-cat train/eval launcher
+新增本地未提交:
+  experiments/streamvln/future_visual_tokens/scripts/run_no_future_continuation_48gpu_alloc.sh
+  experiments/streamvln/future_visual_tokens/scripts/run_future_direct_cat_8gpu_smoke_system.sbatch
 ```
 
 ## 工作区注意

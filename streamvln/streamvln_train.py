@@ -1553,6 +1553,7 @@ def get_model(model_args, training_args, data_args, bnb_model_from_pretrained_ar
     overwrite_config["future_loss_weight"] = model_args.future_loss_weight
     overwrite_config["future_pretrain_only"] = model_args.future_pretrain_only
     overwrite_config["future_fusion"] = model_args.future_fusion
+    overwrite_config["future_injection_mode"] = model_args.future_injection_mode
         
     if model_args.mm_tunable_parts:
         overwrite_config["mm_tunable_parts"] = model_args.mm_tunable_parts
@@ -1828,6 +1829,10 @@ def train(attn_implementation=None):
                 for name, param in model.named_parameters():
                     if "future_fusion" in name:
                         param.requires_grad_(True)
+            if "future_connector" in tunable_parts:
+                for name, param in model.named_parameters():
+                    if "future_marker_embed" in name or "future_type_embed" in name:
+                        param.requires_grad_(True)
         
         for name, param in model.named_parameters():
             if param.requires_grad:  # Check if the parameter requires training
@@ -1910,10 +1915,24 @@ def train(attn_implementation=None):
     trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, callbacks=trainer_callbacks, **data_module)
     # print(list(model.get_model().vision_resampler.parameters())[0])
     # import ipdb; ipdb.set_trace()
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
-        trainer.train(resume_from_checkpoint=True)
-    else:
-        trainer.train()
+    resume_checkpoint = bool(list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")))
+    restore_active_adapters = None
+    if resume_checkpoint and training_args.lora_enable and callable(getattr(model, "active_adapters", None)):
+        # Older PEFT exposes active_adapters as a method, while this Trainer
+        # version expects a list-like attribute when resuming adapter checkpoints.
+        restore_active_adapters = model.active_adapters
+        try:
+            model.active_adapters = restore_active_adapters()
+        except ValueError:
+            model.active_adapters = ["default"]
+    try:
+        if resume_checkpoint:
+            trainer.train(resume_from_checkpoint=True)
+        else:
+            trainer.train()
+    finally:
+        if restore_active_adapters is not None:
+            model.active_adapters = restore_active_adapters
     trainer.save_state()
 
     model.config.use_cache = True

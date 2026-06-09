@@ -110,12 +110,16 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             future_token_count = getattr(config, "future_token_count", 196)
             future_depth = getattr(config, "future_qformer_depth", 2)
             future_heads = getattr(config, "future_qformer_heads", 8)
+            self.future_injection_mode = getattr(config, "future_injection_mode", "fusion")
             self.future_predictor = FutureVisualPredictor(
                 config.hidden_size,
                 num_tokens=future_token_count,
                 depth=future_depth,
                 num_heads=future_heads,
             )
+            if self.future_injection_mode == "concat":
+                self.future_marker_embed = nn.Parameter(torch.randn(1, config.hidden_size) * 0.02)
+                self.future_type_embed = nn.Parameter(torch.randn(1, config.hidden_size) * 0.02)
             if getattr(config, "future_fusion", True):
                 self.future_fusion = FutureToCurrentFusion(config.hidden_size, future_heads)
             else:
@@ -227,7 +231,7 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
 
     def apply_future_prediction(self, image_features, memory_features, future_images=None, future_valid=None):
         if not getattr(self, "use_future_tokens", False):
-            return image_features, None
+            return image_features, None, None
 
         future_targets = None
         if future_images is not None:
@@ -236,8 +240,10 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
 
         future_losses = []
         fused_image_features = []
+        predicted_future_features = []
         for batch_idx, cur_image_features in enumerate(image_features):
             cur_fused = []
+            cur_predicted = []
             for img_idx, cur_image_feature in enumerate(cur_image_features):
                 context_parts = []
                 cur_memory_feature = memory_features[batch_idx]
@@ -261,20 +267,26 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                         ).mean()
                         future_losses.append(mse_loss + cosine_loss)
 
-                if getattr(self.config, "future_fusion", True) and self.future_fusion is not None:
+                if (
+                    getattr(self.config, "future_injection_mode", "fusion") == "fusion"
+                    and getattr(self.config, "future_fusion", True)
+                    and self.future_fusion is not None
+                ):
                     cur_image_feature = self.future_fusion(
                         cur_image_feature.unsqueeze(0),
                         predicted_future.unsqueeze(0),
                     ).squeeze(0)
                 cur_fused.append(cur_image_feature)
+                cur_predicted.append(predicted_future)
             fused_image_features.append(torch.stack(cur_fused, dim=0))
+            predicted_future_features.append(torch.stack(cur_predicted, dim=0))
 
         future_loss = None
         if len(future_losses) > 0:
             future_loss = torch.stack(future_losses).mean()
         elif future_targets is not None:
             future_loss = next(self.future_predictor.parameters()).sum() * 0.0
-        return fused_image_features, future_loss
+        return fused_image_features, future_loss, predicted_future_features
    
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels, 
@@ -286,7 +298,7 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
             return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         image_features, memory_features = self.encode_rgbd(images, depths, poses, intrinsics, time_ids, task_ids)
-        image_features, future_loss = self.apply_future_prediction(
+        image_features, future_loss, predicted_future_features = self.apply_future_prediction(
             image_features,
             memory_features,
             future_images=future_images,
@@ -358,6 +370,27 @@ class StreamVLNForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
                 
                     if special_token == IMAGE_TOKEN_INDEX:
                         cur_image_feature = image_features[batch_idx][cur_img_id]
+                        if (
+                            getattr(self.config, "future_injection_mode", "fusion") == "concat"
+                            and predicted_future_features is not None
+                        ):
+                            cur_future_feature = predicted_future_features[batch_idx][cur_img_id]
+                            future_marker = self.future_marker_embed.to(
+                                device=cur_image_feature.device,
+                                dtype=cur_image_feature.dtype,
+                            )
+                            future_type = self.future_type_embed.to(
+                                device=cur_image_feature.device,
+                                dtype=cur_image_feature.dtype,
+                            )
+                            cur_image_feature = torch.cat(
+                                [
+                                    cur_image_feature,
+                                    future_marker,
+                                    cur_future_feature + future_type,
+                                ],
+                                dim=0,
+                            )
                         cur_img_id += 1
                         # print(batch_idx, i, 'cur_image_feature shape:', cur_image_feature.shape)
                         cur_new_input_embeds.append(cur_image_feature)

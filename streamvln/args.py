@@ -70,6 +70,7 @@ class ModelArguments:
     future_loss_weight: float = field(default=1.0)
     future_pretrain_only: bool = field(default=False)
     future_fusion: bool = field(default=True)
+    future_injection_mode: str = field(default="fusion")
 
 
 @dataclass
