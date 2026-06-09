@@ -39,6 +39,71 @@ from utils.utils import dict_to_cuda
 from utils.dist import *
 from utils.utils import DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX, DEFAULT_MEMORY_TOKEN, MEMORY_TOKEN_INDEX, DEFAULT_VIDEO_TOKEN
 
+
+def _load_streamvln_model_for_eval(model_path, model_max_length, attn_implementation, torch_dtype):
+    adapter_config_path = os.path.join(model_path, "adapter_config.json")
+    is_peft_checkpoint = os.path.exists(adapter_config_path)
+
+    tokenizer_path = model_path
+    base_model_path = model_path
+    if is_peft_checkpoint:
+        with open(adapter_config_path, "r") as f:
+            adapter_config = json.load(f)
+        base_model_path = adapter_config["base_model_name_or_path"]
+        if not os.path.exists(os.path.join(tokenizer_path, "tokenizer_config.json")):
+            tokenizer_path = base_model_path
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        tokenizer_path,
+        model_max_length=model_max_length,
+        padding_side="right",
+    )
+
+    config = transformers.AutoConfig.from_pretrained(model_path)
+    model = StreamVLNForCausalLM.from_pretrained(
+        base_model_path,
+        attn_implementation=attn_implementation,
+        torch_dtype=torch_dtype,
+        config=config,
+        low_cpu_mem_usage=False,
+    )
+    vision_tower = model.get_vision_tower()
+    if vision_tower is not None and not getattr(vision_tower, "is_loaded", True):
+        if get_rank() == 0:
+            print(f"Loading vision tower from {vision_tower.vision_tower_name}")
+        vision_tower.load_model()
+
+    if is_peft_checkpoint:
+        non_lora_path = os.path.join(model_path, "non_lora_trainables.bin")
+        if os.path.exists(non_lora_path):
+            non_lora_trainables = torch.load(non_lora_path, map_location="cpu")
+            non_lora_trainables = {
+                (k[11:] if k.startswith("base_model.") else k): v
+                for k, v in non_lora_trainables.items()
+            }
+            if any(k.startswith("model.model.") for k in non_lora_trainables):
+                non_lora_trainables = {
+                    (k[6:] if k.startswith("model.") else k): v
+                    for k, v in non_lora_trainables.items()
+                }
+            missing, unexpected = model.load_state_dict(non_lora_trainables, strict=False)
+            if get_rank() == 0:
+                print(
+                    f"Loaded non-LoRA trainables from {non_lora_path}; "
+                    f"missing={len(missing)}, unexpected={len(unexpected)}"
+                )
+        else:
+            raise FileNotFoundError(f"Missing non_lora_trainables.bin in {model_path}")
+
+        from peft import PeftModel
+
+        if get_rank() == 0:
+            print(f"Loading LoRA adapter from {model_path}")
+        model = PeftModel.from_pretrained(model, model_path)
+        model = model.merge_and_unload()
+
+    return tokenizer, model
+
 class VLNEvaluator:
     def __init__(
         self,
@@ -528,18 +593,12 @@ def eval():
     init_distributed_mode(args)
     local_rank = args.local_rank
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_path,
-                                                        model_max_length=args.model_max_length,
-                                                        padding_side="right")
-    
-    config = transformers.AutoConfig.from_pretrained(args.model_path)
-    model = StreamVLNForCausalLM.from_pretrained(
-                args.model_path,
-                attn_implementation=os.environ.get("STREAMVLN_ATTENTION", "flash_attention_2"),
-                torch_dtype=torch.bfloat16,
-                config=config,
-                low_cpu_mem_usage=False,
-                )
+    tokenizer, model = _load_streamvln_model_for_eval(
+        args.model_path,
+        args.model_max_length,
+        attn_implementation=os.environ.get("STREAMVLN_ATTENTION", "flash_attention_2"),
+        torch_dtype=torch.bfloat16,
+    )
     model.model.num_history = args.num_history
     model.requires_grad_(False)
     model.to(local_rank)

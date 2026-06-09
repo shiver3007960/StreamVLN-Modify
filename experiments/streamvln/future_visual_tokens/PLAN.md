@@ -1,225 +1,190 @@
 # StreamVLN Future Visual Tokens Plan
 
-最近更新：2026-06-08 CST
+最近更新：2026-06-09 CST
 
-## Baseline
+## 基线协议
 
-已复现的 official StreamVLN checkpoint：
+所有结果统一用 released StreamVLN checkpoint 的 R2R val_unseen eval 对齐：
+
+| run | ckpt | SR | SPL | OS | NE |
+| --- | --- | ---: | ---: | ---: | ---: |
+| official | released | 57.86 | 51.30 | 65.25 | 4.78 |
+
+评估路径：
 
 ```text
-R2R val_unseen 8GPU eval:
-  SR/SPL/OS/NE = 57.86 / 51.30 / 65.25 / 4.78
-  result job: 6318610
-  protocol: released checkpoint + current StreamVLN eval
+/mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/r2r-val-unseen-eval-alloc6367298-20260609-145325
 ```
 
-所有新结果必须用同 split、同 checkpoint/eval 协议比较。
+## 已完成方案：Gated Future Fusion
 
-## Stage 0: 代码接口确认
-
-目标：
+当前已实现的第一版 future baseline：
 
 ```text
-确认 future 插入点、训练样本对齐、token budget。
+1. FutureVisualPredictor 使用 196 个 learnable queries。
+2. queries cross-attend 历史 memory tokens + 当前 observation tokens，预测 t+4 future visual tokens。
+3. 训练监督为同一轨迹、同一视角的 t+4 RGB 帧经过 StreamVLN vision tower / projector / pooling 后的视觉特征。
+4. action joint 阶段不把 future tokens 直接拼入 LLM 序列，而是用 FutureToCurrentFusion：
+   current_tokens = LN(current_tokens + sigmoid(gate) * cross_attn(current_tokens, predicted_future))
+5. 损失为 action CE + 0.1 * future representation loss。
 ```
 
-动作：
+训练分两段：
 
 ```text
-1. 在 dataset 中定位每个训练 round 的当前帧 t 和未来帧 t+k。
-2. 在 model 中定位 encode_rgbd 后的 image_features / memory_features。
-3. 明确 future module default-off，不影响原始 eval。
+Stage 1: 只训练 future_predictor，future_pretrain_only=True，future_fusion=False。
+Stage 2: 从 Stage 1 checkpoint-4000 初始化，训练 future_predictor, future_fusion, mm_mlp_adapter, LLM LoRA。
 ```
 
-数据策略：
+关键 checkpoint：
 
 ```text
-不额外构建新数据集。
-VLNActionDataset 从同一 trajectory 的 rgb 帧序列中读取监督帧：
-  input: 当前采样帧 t
-  target: 同一轨迹、同一相机视角、同一预处理下的 t+4 rgb 帧
-  invalid: 轨迹末尾越界 target 只用于 padding，不计入 future loss
+Stage 1 best:
+  /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023/checkpoint-4000
+
+Stage 2:
+  /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s2-48g-alloc6367298-ddp-20260609-091618/checkpoint-{3000,4000,4978}
 ```
 
-验证：
+最终 R2R val_unseen 结果：
+
+| run | ckpt | SR | SPL | OS | NE | 结论 |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| official | released | 57.86 | 51.30 | 65.25 | 4.78 | baseline 正常 |
+| gated future | checkpoint-3000 | 45.51 | 41.06 | 52.47 | 6.05 | 明显负收益 |
+| gated future | checkpoint-4000 | 46.22 | 41.98 | 52.47 | 5.87 | 明显负收益 |
+| gated future | checkpoint-4978 | 46.33 | 41.76 | 52.09 | 5.93 | 明显负收益 |
+
+当前判断：
 
 ```text
-无 future flag 时，单卡 smoke eval 输出和当前 baseline 路径一致。
+负收益不能直接归因于 future 预测无效。
+混杂因素包括：
+  1. old trajectory 数据续训是否本身会让官方 ckpt 掉点；
+  2. gated fusion 是否污染当前 observation tokens；
+  3. LoRA / projector / future module joint 微调是否扰动原 policy。
 ```
 
-## Stage 1: Predicted Future 模块预训练
+## 下一轮排查目标
 
-目标：
+目标是控制无关变量，只判断 future 信息是否有用。
+
+优先级：
 
 ```text
-先让可学习 future 模块具备预测未来视觉 token 的能力，避免一开始把随机 future token 注入 action 链路。
+1. 先整理当前工作区，删除冗余临时文件，保留可复现实验脚本和必要日志指针，然后推送 GitHub。
+2. 跑 no-future old-data continuation control。
+3. 跑 direct-cat future baseline。
+4. 比较 official / no-future continuation / direct-cat future / gated future。
 ```
 
-动作：
+## Control A：Official Ckpt + 老数据续训
+
+目的：
 
 ```text
-1. 加入 QFormer-style future predictor：
-   learnable future queries cross-attend 当前/历史视觉 token。
-2. 输出 196 个 predicted future tokens，和一张图像的 14x14 token 数一致。
-3. target 为未来帧经过 StreamVLN vision tower/projector/pooling 后的 196 tokens，target detach。
-4. 冻结 StreamVLN 主体，优先只训练 future predictor / target loss。
+验证官方 ckpt 在相同 old trajectory 数据上继续训练 1 epoch 是否本身掉点。
+如果 no-future control 也显著掉点，说明当前负收益很可能来自续训数据/协议，而不是 future 设计本身。
 ```
 
-训练超参：
+训练策略：
 
 ```text
-epoch: 1
-lr: 2e-4
-batch: per_device_train_batch_size 2, gradient_accumulation_steps 2
-warmup_ratio: 0.075
-scheduler: cosine
-future_loss_weight: 1.0
-wandb: report_to wandb, project streamvln-future
-
-依据:
-  原 StreamVLN stage1 也是 1 epoch；
-  原主模型 LR 为 2e-5；
-  future predictor 是随机初始化小模块，因此预训练 LR 取 10x，即 2e-4；
-  warmup/batch 继承原 stage1 配置。
-```
-
-验证：
-
-```text
-1. 2GPU smoke 能训练、保存 ckpt、resume。
-2. future loss 正常下降，cosine / MSE 不发散。
-3. 关闭 future flag 时原始 StreamVLN 路径不变。
-```
-
-Review gate：
-
-```text
-如果 future predictor 不能稳定学习未来视觉特征，先调整 horizon / predictor / loss，不进入 joint 微调。
-```
-
-## Stage 2: Future-Aware Action Joint 微调
-
-目标：
-
-```text
-让 predicted future tokens 进入 action 决策链路，并和导航动作 loss 一起训练。
-```
-
-动作：
-
-```text
-1. 复用 Stage 1 的 future predictor 初始化。
-2. 用 future-to-current cross-attn/gate 将 196 个 future tokens 融入当前 image tokens。
-3. loss = action CE + lambda_future * future representation loss。
-4. 训练 future predictor / fusion / LoRA / mm_projector，避免全参训练 OOM。
-```
-
-建议初始实现：
-
-```text
-future token count: 196
-horizon: t+4 优先
-fusion: current_tokens <- cross-attn(future_tokens) + gate
-trainable: future predictor / fusion / LoRA / mm_projector，避免全参 2GPU OOM
-```
-
-训练超参：
-
-```text
+init: released StreamVLN checkpoint
+future: disabled
+data: data/trajectory_data/R2R, data/trajectory_data/RxR, data/trajectory_data/EnvDrop
+trainable: mm_mlp_adapter + LLM LoRA
+frozen: vision_tower, full language model except LoRA
+lora: r=8, alpha=16, dropout=0.05, target q_proj,v_proj
 epoch: 1
 lr: 2e-5
-8GPU smoke batch: per_device_train_batch_size 1, gradient_accumulation_steps 2, global batch 16
-48GPU full batch: per_device_train_batch_size 1, gradient_accumulation_steps 2, global batch 96
 warmup_ratio: 0.075
 scheduler: cosine
-future_loss_weight: 0.1
-lora: r=8, alpha=16, dropout=0.05
-wandb: report_to wandb, project streamvln-future
-save/eval: smoke 每 10 update steps；full 每 1000/500 update steps
-gradient_checkpointing: false
+```
 
-依据:
-  action joint 阶段已经进入 LLM/VLM 行为微调，LR 回到原 StreamVLN stage1 的 2e-5；
-  196 future tokens 会增加显存，所以 per-device batch 固定为 1；
-  48GPU global batch 96 接近原 StreamVLN stage1 的 128，同时避免直接沿用 8GPU accumulation 后把 batch 放大到 192；
-  future loss 只作为辅助约束，先设 0.1，避免压过 action CE。
-  DDP + LoRA 在当前环境下与 reentrant gradient checkpointing 冲突，因此 joint 阶段先关闭 gradient checkpointing。
+资源计划：
+
+```text
+1. 先用 48 卡 allocation 中 1 个 8GPU node smoke，验证训练、保存、恢复、eval loader。
+2. smoke 通过后，用 48GPU 跑完整 1 epoch。
+```
+
+控制变量要求：
+
+```text
+后续 direct-cat future 训练的 action 微调部分应尽量复用本 control 的数据、LR、epoch、LoRA 设置和 total batch。
+```
+
+## Control B：Direct-Cat Future Baseline
+
+目的：
+
+```text
+替代 gated fusion，避免 predicted future 直接改写当前 observation tokens。
+让模型通过 attention 自己决定是否使用 future tokens。
+```
+
+架构：
+
+```text
+1. 复用 Stage 1 future_predictor checkpoint-4000 初始化。
+2. 对每个当前 observation，先保留原 current visual tokens。
+3. 在 current visual tokens 后追加 learnable future marker。
+4. 再追加 predicted future tokens + learnable future type embedding。
+5. 不启用 FutureToCurrentFusion。
+```
+
+输入形态：
+
+```text
+[current observation visual tokens]
+[future_marker_embed]
+[predicted future visual tokens + future_type_embed]
+```
+
+训练策略：
+
+```text
+init: released StreamVLN checkpoint + Stage 1 future_predictor checkpoint-4000
+data: same as Control A
+trainable: future_predictor, future marker/type embedding, mm_mlp_adapter, LLM LoRA
+frozen: vision_tower, full language model except LoRA
+lora: r=8, alpha=16, dropout=0.05, target q_proj,v_proj
+epoch: 1
+lr: 2e-5 for action path; lower LR may be used for reused future_predictor if param groups are implemented
+future_loss_weight: 0.1
+```
+
+资源与 batch 对齐：
+
+```text
+Control A full run: 48GPU。
+Direct-cat run: 32GPU。
+
+两者必须尽量保持 total batch 一致。
+若 Control A 使用 per_device_train_batch_size=1, grad_accum=2, global batch=96，
+则 Direct-cat 32GPU 优先使用 per_device_train_batch_size=1, grad_accum=3, global batch=96。
+
+如果 direct-cat 显存不足，则先 smoke 后再调整，但调整必须同步记录，并说明和 Control A 的差异。
 ```
 
 验证：
 
 ```text
-1. 8GPU smoke：能训练、保存 ckpt、保存 non_lora_trainables、resume/eval 路径可用。
-2. full run：future loss 正常下降，action loss 不 NaN。
-3. checkpoint-based eval 不能只看 train/eval loss，后续需要 R2R/RxR val_unseen SR/SPL。
+1. 8GPU smoke：训练、保存、恢复、eval loader 均可用。
+2. 32GPU full：完成 1 epoch。
+3. R2R val_unseen eval 后和 Control A 同表比较。
 ```
 
-说明：
+## 后续诊断
+
+只在 Control A / B 结果出来后进入：
 
 ```text
-相比直接 joint 训练，我更建议 Stage 1 + Stage 2 两段式：
-  随机 future token 直接进 action 链路容易被模型忽略或扰乱动作学习；
-  先训 future predictor 可以先验证监督信号质量；
-  joint 阶段再验证 future 是否真正进入决策。
-```
-
-## Stage 3: Oracle / Control 诊断
-
-目标：
-
-```text
-判断效果瓶颈来自 future 预测质量，还是来自注入/消费路径。
-```
-
-动作：
-
-```text
-1. Oracle future: 用真实未来帧的 196 tokens 替换 predicted future tokens。
-2. Zero future: 将 future tokens 置零。
-3. Shuffle future: batch 内打乱 future tokens。
-4. Standalone future tokens vs fused current tokens 对比。
-```
-
-Review gate：
-
-```text
-如果 oracle future 有收益而 predicted future 没收益，优先改 predictor。
-如果 oracle future 也无收益，优先改注入点或动作消费路径。
-```
-
-## Stage 4: R2R Pilot / Medium Eval
-
-目标：
-
-```text
-判断 predicted future 是否值得 official-scale 训练。
-```
-
-动作：
-
-```text
-1. 先跑 pilot，不用 train loss 直接下结论。
-2. 对关键 checkpoint 做 8GPU R2R val_unseen eval。
-3. 同时保留 no-future continuation control。
-```
-
-成功标准：
-
-```text
-SR/SPL 接近或超过 official baseline；
-future controls 证明模型实际依赖 future；
-没有明显增加不可接受的显存/吞吐成本。
-```
-
-## Stage 5: 扩展实验
-
-只在 Stage 2/3/4 有正信号后进入：
-
-```text
-1. token budget: 196 vs 49/98。
-2. horizon: t+4 vs t+8。
-3. injection: standalone future tokens vs fused current tokens。
-4. target: current view future vs lookdown/local-geometry future。
+1. disable future: 加载 future ckpt，但 eval 时不插入 future，判断是否是 action 微调本身破坏 policy。
+2. oracle future: 用真实未来帧视觉 token 替代 predicted future，判断预测质量上限。
+3. random/shuffle future: 判断模型是否真的依赖 future token。
+4. official Stage2 data: 如果 old-data continuation 掉点，补齐 DAgger/co-training 后再训练。
 ```
 
 ## Artifact 约定
@@ -228,14 +193,8 @@ future controls 证明模型实际依赖 future；
 文档:
   experiments/streamvln/future_visual_tokens/
 
-可复用脚本:
+脚本:
   experiments/streamvln/future_visual_tokens/scripts/
-
-Stage 1/2 训练脚本:
-  experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_8gpu.sbatch
-  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu.sbatch
-  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu_smoke_system.sbatch
-  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_48gpu_alloc.sh
 
 小日志:
   experiments/streamvln/future_visual_tokens/logs/<run>/
