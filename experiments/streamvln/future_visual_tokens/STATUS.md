@@ -74,7 +74,7 @@ Stage 2 trainer state / proxy eval loss:
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-48g-alloc6367298-20260609-220144
    per_device_train_batch_size=1, gradient_accumulation_steps=2, global_batch=96。
    这样和 48GPU no-future control 的 global batch=96 完全对齐。
-   current evidence: checkpoint-1000 已保存，global_step=1000，loss=0.2856，adapter/non_lora 均存在。
+   current evidence: checkpoint-1000 / checkpoint-2000 已保存；checkpoint-2000 global_step=2000，loss=0.2762，adapter/non_lora 均存在。
 4. 16GPU pending job 6387987 已取消；16GPU launcher 已删除。
 ```
 
