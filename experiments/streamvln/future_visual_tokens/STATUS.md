@@ -6,7 +6,7 @@
 
 ```text
 stage: Stage 2 Future-aware action joint 微调
-status: 8GPU smoke completed, ready to launch 48GPU allocation run
+status: 48GPU full run active, step 1000 checkpoint/eval validated
 ```
 
 ## Checklist
@@ -31,9 +31,8 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-1. 推送 Stage 2 joint 代码和脚本到 GitHub。
-2. 用 allocation 6367298 启动 48GPU Stage 2 joint full run。
-3. 监控 step 500 eval 和 step 1000 checkpoint。
+1. 继续监控 full run 到完成。
+2. 后续用 saved checkpoints 做 R2R/RxR val_unseen VLN eval。
 ```
 
 ## Stage 2 配置
@@ -68,6 +67,24 @@ validated:
 fixes from failed smoke:
   LoRA target_modules now respects lora_target_modules, using q_proj,v_proj.
   local checkpoint tokenizer loading has a fallback branch.
+```
+
+## 当前 Stage 2 Full Run
+
+```text
+run: streamvln-future-s2-48g-alloc6367298-ddp-20260609-091618
+scale: full Stage 2 joint finetune, 48GPU, 1 epoch
+status: running
+job: allocation 6367298, eailab_system, 6 nodes / 48 GPUs
+artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s2-48g-alloc6367298-ddp-20260609-091618
+logs:
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s2-48g-alloc6367298-ddp-20260609-091618/train.out
+  experiments/streamvln/future_visual_tokens/logs/streamvln-future-s2-48g-alloc6367298-ddp-20260609-091618/train.err
+validated:
+  step 500 eval_loss: 0.2923053205013275
+  step 1000 eval_loss: 0.2814578711986542
+  checkpoint-1000 saved adapter_model.safetensors, optimizer.pt, scheduler.pt, trainer_state.json, 48 rng_state files
+  checkpoint-1000 non_lora_trainables.bin contains future_predictor, future_fusion, mm_projector
 ```
 
 ## 当前运行
