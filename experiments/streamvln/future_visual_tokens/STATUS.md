@@ -6,7 +6,7 @@
 
 ```text
 stage: failure diagnosis / direct-cat future baseline
-status: no-future continuation control running; preparing 16GPU direct-cat full run
+status: no-future continuation control running; preparing 48GPU direct-cat full run on allocation 6367298
 ```
 
 ## Checklist
@@ -69,10 +69,10 @@ Stage 2 trainer state / proxy eval loss:
    run: streamvln-future-cat-smoke-6387718
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-smoke-6387718
    evidence: checkpoint-10 global_step=10, checkpoint-12 global_step=12, resume OK。
-3. direct-cat full run 改为 16GPU：
-   per_device_train_batch_size=1, gradient_accumulation_steps=6, global_batch=96。
-   这样和 48GPU no-future control 的 global batch=96 对齐。
-4. 下一步：提交 16GPU sbatch 并确认进入训练、能正常保存 checkpoint。
+3. direct-cat full run 改为复用 48GPU allocation 6367298：
+   per_device_train_batch_size=1, gradient_accumulation_steps=2, global_batch=96。
+   这样和 48GPU no-future control 的 global batch=96 完全对齐。
+4. 16GPU pending job 6387987 已取消；下一步等 no-future control 完成后，直接在 6367298 上启动 direct-cat。
 ```
 
 ## 排查假设

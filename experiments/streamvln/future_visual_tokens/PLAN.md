@@ -159,20 +159,20 @@ future_loss_weight: 0.1
 
 ```text
 Control A full run: 48GPU。
-Direct-cat run: 16GPU。
+Direct-cat run: 48GPU allocation 6367298 if the allocation remains available.
 
 两者必须尽量保持 total batch 一致。
 若 Control A 使用 per_device_train_batch_size=1, grad_accum=2, global batch=96，
-则 Direct-cat 16GPU 优先使用 per_device_train_batch_size=1, grad_accum=6, global batch=96。
+则 Direct-cat 48GPU 使用 per_device_train_batch_size=1, grad_accum=2, global batch=96。
 
-如果 direct-cat 显存不足，则先 smoke 后再调整，但调整必须同步记录，并说明和 Control A 的差异。
+如果 48GPU allocation 不可用，再退回 16GPU sbatch，并用 grad_accum=6 保持 global batch=96。
 ```
 
 验证：
 
 ```text
 1. 8GPU smoke：训练、保存、恢复、eval loader 均可用。
-2. 16GPU full：完成 1 epoch。
+2. 48GPU full：完成 1 epoch。
 3. R2R val_unseen eval 后和 Control A 同表比较。
 ```
 
