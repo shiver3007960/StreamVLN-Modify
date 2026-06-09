@@ -1,12 +1,12 @@
 # StreamVLN Future Visual Tokens Status
 
-最近更新：2026-06-08 CST
+最近更新：2026-06-09 CST
 
 ## 当前阶段
 
 ```text
-stage: Stage 1 Predicted future 模块预训练
-status: completed DDP/no-DeepSpeed 48GPU Stage 1 run
+stage: Stage 2 Future-aware action joint 微调
+status: 8GPU smoke completed, ready to launch 48GPU allocation run
 ```
 
 ## Checklist
@@ -14,7 +14,7 @@ status: completed DDP/no-DeepSpeed 48GPU Stage 1 run
 ```text
 Stage 0 代码接口确认: done
 Stage 1 Predicted future 模块预训练: done
-Stage 2 Future-aware action joint 微调: drafted
+Stage 2 Future-aware action joint 微调: smoke passed
 Stage 3 Oracle / control 诊断: pending
 Stage 4 R2R pilot / medium eval: pending
 Stage 5 扩展实验: pending
@@ -31,8 +31,43 @@ R2R val_unseen 8GPU eval:
 ## 下一步
 
 ```text
-基于当前 Stage 1 predictor checkpoint 做恢复检查或进入 Stage 2 joint 微调。
-allocation 6367298 仍处于 RUNNING，未自动释放。
+1. 推送 Stage 2 joint 代码和脚本到 GitHub。
+2. 用 allocation 6367298 启动 48GPU Stage 2 joint full run。
+3. 监控 step 500 eval 和 step 1000 checkpoint。
+```
+
+## Stage 2 配置
+
+```text
+init checkpoint: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s1-48g-alloc6367298-ddp-20260608-230023/checkpoint-4000
+trainable: future_predictor, future_fusion, mm_mlp_adapter, mm_lora_layer
+frozen: vision_tower, full language model except LoRA
+data: data/trajectory_data/R2R, data/trajectory_data/RxR, data/trajectory_data/EnvDrop
+lr: 2e-5
+future_loss_weight: 0.1
+48GPU batch: per_device_train_batch_size 1, gradient_accumulation_steps 2, global batch 96
+gradient_checkpointing: false
+reference script: scripts/streamvln_train_slurm.sh
+```
+
+## 最新 smoke
+
+```text
+run: streamvln-future-s2-smoke-6371130
+scale: smoke, 8GPU, 20 update steps
+status: completed
+artifact: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-s2-smoke-6371130
+eval:
+  step 10 eval_loss: 0.3387698233127594
+  step 20 eval_loss: 0.33962497115135193
+validated:
+  train/backward completed with gradient_checkpointing=false
+  checkpoint-10 and checkpoint-20 saved optimizer/scheduler/rng
+  checkpoint-10 and checkpoint-20 saved adapter_model.safetensors
+  checkpoint-10 and checkpoint-20 saved non_lora_trainables.bin with future_predictor, future_fusion, mm_projector
+fixes from failed smoke:
+  LoRA target_modules now respects lora_target_modules, using q_proj,v_proj.
+  local checkpoint tokenizer loading has a fallback branch.
 ```
 
 ## 当前运行
@@ -80,6 +115,8 @@ experiments/streamvln/future_visual_tokens/scripts/run_baseline_train_2gpu_save_
 experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_8gpu.sbatch
 experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_48gpu_system.sbatch
 experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu.sbatch
+experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu_smoke_system.sbatch
+experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_48gpu_alloc.sh
 ```
 
 ## 已草拟代码改动

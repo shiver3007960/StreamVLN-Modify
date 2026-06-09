@@ -228,6 +228,27 @@ def safe_save_model_for_hf_trainer_fsdp(trainer: transformers.Trainer,
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
+class SaveNonLoraTrainablesCallback(transformers.TrainerCallback):
+    """Save non-LoRA trainables in each checkpoint for PEFT runs."""
+
+    def on_save(self, args, state, control, model=None, **kwargs):
+        if model is None or not getattr(args, "lora_enable", False):
+            return control
+        if args.local_rank not in (0, -1):
+            return control
+
+        from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+
+        output_dir = os.path.join(args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}")
+        os.makedirs(output_dir, exist_ok=True)
+        if hasattr(model, "config"):
+            model.config.save_pretrained(output_dir)
+        if hasattr(model, "generation_config"):
+            model.generation_config.save_pretrained(output_dir)
+        non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(model.named_parameters())
+        torch.save(non_lora_state_dict, os.path.join(output_dir, "non_lora_trainables.bin"))
+        return control
+
 def smart_tokenizer_and_embedding_resize(
     special_tokens_dict: Dict,
     tokenizer: transformers.PreTrainedTokenizer,
@@ -1641,8 +1662,7 @@ def train(attn_implementation=None):
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
-            # target_modules=find_all_linear_names(model, training_args.lora_target_modules.split(",")),
-            target_modules=find_all_linear_names(model),
+            target_modules=training_args.lora_target_modules.split(","),
             lora_dropout=training_args.lora_dropout,
             bias=training_args.lora_bias,
             task_type="CAUSAL_LM",
@@ -1674,6 +1694,13 @@ def train(attn_implementation=None):
             model_max_length=training_args.model_max_length,
             padding_side="right",
             use_fast=False,
+        )
+    else:
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
         )
 
     rank0_print(f"Prompt version: {model_args.version}")
@@ -1879,7 +1906,8 @@ def train(attn_implementation=None):
                 return wrap_func
             FSDP.__init__ = patch_FSDP_use_orig_params(FSDP.__init__)
     
-    trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    trainer_callbacks = [SaveNonLoraTrainablesCallback()] if training_args.lora_enable else None
+    trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, callbacks=trainer_callbacks, **data_module)
     # print(list(model.get_model().vision_resampler.parameters())[0])
     # import ipdb; ipdb.set_trace()
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):

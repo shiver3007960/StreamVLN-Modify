@@ -128,25 +128,30 @@ trainable: future predictor / fusion / LoRA / mm_projector，避免全参 2GPU O
 ```text
 epoch: 1
 lr: 2e-5
-batch: per_device_train_batch_size 1, gradient_accumulation_steps 4
+8GPU smoke batch: per_device_train_batch_size 1, gradient_accumulation_steps 2, global batch 16
+48GPU full batch: per_device_train_batch_size 1, gradient_accumulation_steps 2, global batch 96
 warmup_ratio: 0.075
 scheduler: cosine
 future_loss_weight: 0.1
 lora: r=8, alpha=16, dropout=0.05
 wandb: report_to wandb, project streamvln-future
+save/eval: smoke 每 10 update steps；full 每 1000/500 update steps
+gradient_checkpointing: false
 
 依据:
   action joint 阶段已经进入 LLM/VLM 行为微调，LR 回到原 StreamVLN stage1 的 2e-5；
-  196 future tokens 会增加显存，所以先把 per-device batch 降到 1，并用 grad accumulation 保持有效 batch；
+  196 future tokens 会增加显存，所以 per-device batch 固定为 1；
+  48GPU global batch 96 接近原 StreamVLN stage1 的 128，同时避免直接沿用 8GPU accumulation 后把 batch 放大到 192；
   future loss 只作为辅助约束，先设 0.1，避免压过 action CE。
+  DDP + LoRA 在当前环境下与 reentrant gradient checkpointing 冲突，因此 joint 阶段先关闭 gradient checkpointing。
 ```
 
 验证：
 
 ```text
-1. 2GPU smoke：能训练、保存 ckpt、resume。
-2. future loss 正常下降，action loss 不 NaN。
-3. future dropout/shuffle 对 loss 或 eval 有影响。
+1. 8GPU smoke：能训练、保存 ckpt、保存 non_lora_trainables、resume/eval 路径可用。
+2. full run：future loss 正常下降，action loss 不 NaN。
+3. checkpoint-based eval 不能只看 train/eval loss，后续需要 R2R/RxR val_unseen SR/SPL。
 ```
 
 说明：
@@ -229,6 +234,8 @@ future controls 证明模型实际依赖 future；
 Stage 1/2 训练脚本:
   experiments/streamvln/future_visual_tokens/scripts/run_future_stage1_predictor_pretrain_8gpu.sbatch
   experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu.sbatch
+  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_8gpu_smoke_system.sbatch
+  experiments/streamvln/future_visual_tokens/scripts/run_future_stage2_joint_48gpu_alloc.sh
 
 小日志:
   experiments/streamvln/future_visual_tokens/logs/<run>/
