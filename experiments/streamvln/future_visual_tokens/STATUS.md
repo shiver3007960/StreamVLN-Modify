@@ -1,12 +1,12 @@
 # StreamVLN Future Visual Tokens Status
 
-最近更新：2026-06-09 CST
+最近更新：2026-06-10 CST
 
 ## 当前阶段
 
 ```text
-stage: failure diagnosis / direct-cat future baseline
-status: no-future continuation control completed; 48GPU direct-cat full run running on allocation 6367298
+stage: failure diagnosis / direct-cat future baseline / no-future ckpt eval
+status: no-future continuation control completed; direct-cat full run running; no-future continuation ckpt eval running
 ```
 
 ## Checklist
@@ -76,6 +76,13 @@ Stage 2 trainer state / proxy eval loss:
    这样和 48GPU no-future control 的 global batch=96 完全对齐。
    current evidence: checkpoint-1000 / checkpoint-2000 已保存；checkpoint-2000 global_step=2000，loss=0.2762，adapter/non_lora 均存在。
 4. 16GPU pending job 6387987 已取消；16GPU launcher 已删除。
+5. no-future continuation 的 checkpoint eval 正在 8GPU eailab_system 上运行：
+   job: 6389342
+   run: no-future-cont-r2r-val-unseen-8g-6389342
+   checkpoints: checkpoint-3000, checkpoint-4000, checkpoint-4988
+   results: /mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/no-future-cont-r2r-val-unseen-8g-6389342
+   logs: /mnt/hwfile/lizhen/StreamVLN/experiments/streamvln/future_visual_tokens/logs/no-future-cont-r2r-val-unseen-8g-6389342
+   current evidence: checkpoint-3000 已开始加载模型并进入 eval。
 ```
 
 ## 排查假设
@@ -107,9 +114,8 @@ oracle future / shuffle future 等诊断放到下一轮。
   streamvln/streamvln_train.py: LoRA resume active_adapters compatibility patch
   streamvln/streamvln_eval.py: 支持 PEFT adapter + non_lora_trainables eval 加载
 
-新增本地未提交:
-  experiments/streamvln/future_visual_tokens/scripts/run_no_future_continuation_48gpu_alloc.sh
-  experiments/streamvln/future_visual_tokens/scripts/run_future_direct_cat_8gpu_smoke_system.sbatch
+新增脚本:
+  experiments/streamvln/future_visual_tokens/scripts/run_no_future_continuation_r2r_val_unseen_8gpu_eval.sbatch
 ```
 
 ## 工作区注意
