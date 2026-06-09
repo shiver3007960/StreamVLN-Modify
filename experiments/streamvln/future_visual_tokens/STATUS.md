@@ -83,6 +83,7 @@ logs:
 validated:
   step 500 eval_loss: 0.2923053205013275
   step 1000 eval_loss: 0.2814578711986542
+  step 1500 eval_loss: 0.27747154235839844
   checkpoint-1000 saved adapter_model.safetensors, optimizer.pt, scheduler.pt, trainer_state.json, 48 rng_state files
   checkpoint-1000 non_lora_trainables.bin contains future_predictor, future_fusion, mm_projector
 ```
