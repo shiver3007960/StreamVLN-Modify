@@ -5,8 +5,8 @@
 ## 当前阶段
 
 ```text
-stage: failure diagnosis / direct-cat future baseline / no-future ckpt eval
-status: no-future continuation control completed; direct-cat full run running; no-future continuation ckpt eval running
+stage: failure diagnosis / direct-cat future baseline
+status: no-future continuation control eval completed; direct-cat full run running
 ```
 
 ## Checklist
@@ -76,13 +76,14 @@ Stage 2 trainer state / proxy eval loss:
    这样和 48GPU no-future control 的 global batch=96 完全对齐。
    current evidence: checkpoint-1000 / checkpoint-2000 已保存；checkpoint-2000 global_step=2000，loss=0.2762，adapter/non_lora 均存在。
 4. 16GPU pending job 6387987 已取消；16GPU launcher 已删除。
-5. no-future continuation 的 checkpoint eval 正在 8GPU eailab_system 上运行：
+5. no-future continuation 的 checkpoint eval 已完成：
    job: 6389342
    run: no-future-cont-r2r-val-unseen-8g-6389342
    checkpoints: checkpoint-3000, checkpoint-4000, checkpoint-4988
    results: /mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/no-future-cont-r2r-val-unseen-8g-6389342
    logs: /mnt/hwfile/lizhen/StreamVLN/experiments/streamvln/future_visual_tokens/logs/no-future-cont-r2r-val-unseen-8g-6389342
-   current evidence: checkpoint-3000 已开始加载模型并进入 eval。
+   best: checkpoint-4000, SR=46.76, SPL=42.12, OS=52.75, NE=5.92。
+   conclusion: official ckpt 用 old trajectory data 继续 LoRA 微调 1 epoch 本身会掉点，需作为 future ablation 的重要控制项。
 ```
 
 ## 排查假设
