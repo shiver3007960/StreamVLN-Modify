@@ -5,8 +5,8 @@
 ## 当前阶段
 
 ```text
-stage: failure diagnosis / direct-cat future baseline
-status: no-future continuation control eval completed; direct-cat future eval completed
+stage: failure diagnosis / direct-cat future baseline completed
+status: 48GPU allocation released; workspace cleaned; next decision pending
 ```
 
 ## Checklist
@@ -17,7 +17,7 @@ Stage 1 future_predictor 预训练: done
 Stage 2 gated fusion joint 微调: done
 Stage 3 R2R val_unseen eval: done
 Stage 4 失败原因排查: running
-Stage 5 direct-cat future baseline: smoke done
+Stage 5 direct-cat future baseline: done
 ```
 
 ## 当前结论
@@ -68,21 +68,21 @@ Stage 2 trainer state / proxy eval loss:
 ## 下一步
 
 ```text
-1. no-future old-data continuation control 正在 48GPU allocation 6367298 上运行：
+1. 48GPU allocation 6367298 已释放。
+2. no-future old-data continuation control 已完成：
    run: streamvln-no-future-cont-48g-alloc6367298-20260609-191202
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-no-future-cont-48g-alloc6367298-20260609-191202
    current evidence: completed, epoch=1.0, train_loss=0.1589, final model saved。
-2. direct-cat future baseline 已通过 8GPU smoke：
+3. direct-cat future baseline 已通过 8GPU smoke：
    run: streamvln-future-cat-smoke-6387718
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-smoke-6387718
    evidence: checkpoint-10 global_step=10, checkpoint-12 global_step=12, resume OK。
-3. direct-cat full run 已完成：
+4. direct-cat full run 已完成：
    run: streamvln-future-cat-48g-alloc6367298-20260609-220144
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-48g-alloc6367298-20260609-220144
    per_device_train_batch_size=1, gradient_accumulation_steps=2, global_batch=96。
    这样和 48GPU no-future control 的 global batch=96 完全对齐。
    current evidence: checkpoint-3000 / checkpoint-4000 / checkpoint-4988 已保存并完成 eval。
-4. 16GPU pending job 6387987 已取消；16GPU launcher 已删除。
 5. no-future continuation 的 checkpoint eval 已完成：
    job: 6389342
    run: no-future-cont-r2r-val-unseen-8g-6389342
@@ -98,6 +98,7 @@ Stage 2 trainer state / proxy eval loss:
    logs: /mnt/hwfile/lizhen/StreamVLN/experiments/streamvln/future_visual_tokens/logs/future-cat-r2r-val-unseen-eval-alloc6367298-20260610-100331
    best: checkpoint-3000 by SPL, SR=45.24, SPL=40.49, OS=53.24, NE=6.13。
    conclusion: direct-cat future 没有恢复性能，仍低于 no-future control。
+7. 临时 16GPU checkpoint-4000 加速探针结果/日志已删除；正式结果只保留 8GPU 三 ckpt eval。
 ```
 
 ## 排查假设
@@ -112,9 +113,9 @@ H4: LoRA/projector/action joint 微调扰动了原 policy。
 优先判断：
 
 ```text
-先跑 H1 no-future continuation control。
-再跑 H2 direct-cat future baseline。
-oracle future / shuffle future 等诊断放到下一轮。
+H1 已验证：old trajectory data 续训本身显著掉点。
+H2 direct-cat 已验证：直接拼接 predicted future 仍低于 no-future control。
+下一轮优先考虑 oracle future / zero future / shuffle future，判断 future 信息本身是否有效。
 ```
 
 ## 当前代码状态
@@ -129,7 +130,7 @@ oracle future / shuffle future 等诊断放到下一轮。
   streamvln/streamvln_train.py: LoRA resume active_adapters compatibility patch
   streamvln/streamvln_eval.py: 支持 PEFT adapter + non_lora_trainables eval 加载
 
-新增脚本:
+保留脚本:
   experiments/streamvln/future_visual_tokens/scripts/run_no_future_continuation_r2r_val_unseen_8gpu_eval.sbatch
   experiments/streamvln/future_visual_tokens/scripts/run_future_direct_cat_r2r_val_unseen_eval_48gpu_alloc.sh
 ```
@@ -137,12 +138,7 @@ oracle future / shuffle future 等诊断放到下一轮。
 ## 工作区注意
 
 ```text
-当前有未提交改动，需要先清理和 review：
-  experiments/streamvln/future_visual_tokens/STATUS.md
-  experiments/streamvln/future_visual_tokens/PLAN.md
-  streamvln/streamvln_eval.py
-  experiments/streamvln/future_visual_tokens/scripts/run_r2r_val_unseen_eval_48gpu_alloc.sh
-
+当前没有需要保留的临时 Slurm allocation。
+正式 checkpoint / eval result / logs 保留。
 不要删除大结果和 checkpoint。
-冗余日志/旧失败脚本只在确认不影响复现后再清理。
 ```
