@@ -6,7 +6,7 @@
 
 ```text
 stage: failure diagnosis / direct-cat future baseline
-status: no-future continuation control eval completed; direct-cat full run running
+status: no-future continuation control eval completed; direct-cat future eval completed
 ```
 
 ## Checklist
@@ -23,9 +23,10 @@ Stage 5 direct-cat future baseline: smoke done
 ## 当前结论
 
 ```text
-当前 gated future fusion 方案明显负收益。
-该方案是：future_predictor 先预测 196 个 t+4 future tokens，再通过 gated cross-attn residual 加回 current observation tokens。
-R2R val_unseen 上三个 future ckpt 的 SR/SPL 都比 official 低约 10-12 点以上。
+当前 gated future fusion 和 direct-cat future 方案都明显负收益。
+gated 方案：future_predictor 预测 196 个 t+4 future tokens，再通过 gated cross-attn residual 加回 current observation tokens。
+direct-cat 方案：current visual tokens 后拼接 future marker + 196 个 predicted future tokens。
+R2R val_unseen 上 direct-cat 最好 SR=45.41 / SPL=40.49，低于 no-future continuation control 的 SR=46.76 / SPL=42.12。
 ```
 
 最终 R2R val_unseen：
@@ -36,11 +37,17 @@ R2R val_unseen 上三个 future ckpt 的 SR/SPL 都比 official 低约 10-12 点
 | gated future | checkpoint-3000 | 45.51 | 41.06 | 52.47 | 6.05 |
 | gated future | checkpoint-4000 | 46.22 | 41.98 | 52.47 | 5.87 |
 | gated future | checkpoint-4978 | 46.33 | 41.76 | 52.09 | 5.93 |
+| no-future continuation | checkpoint-4000 | 46.76 | 42.12 | 52.75 | 5.92 |
+| direct-cat future | checkpoint-3000 | 45.24 | 40.49 | 53.24 | 6.13 |
+| direct-cat future | checkpoint-4000 | 45.41 | 40.45 | 53.78 | 6.26 |
+| direct-cat future | checkpoint-4988 | 45.41 | 40.41 | 53.34 | 6.21 |
 
 结果路径：
 
 ```text
 /mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/r2r-val-unseen-eval-alloc6367298-20260609-145325
+/mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/no-future-cont-r2r-val-unseen-8g-6389342
+/mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/future-cat-r2r-val-unseen-eval-alloc6367298-20260610-100331
 ```
 
 ## 有效 artifacts
@@ -69,12 +76,12 @@ Stage 2 trainer state / proxy eval loss:
    run: streamvln-future-cat-smoke-6387718
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-smoke-6387718
    evidence: checkpoint-10 global_step=10, checkpoint-12 global_step=12, resume OK。
-3. direct-cat full run 正在复用 48GPU allocation 6367298：
+3. direct-cat full run 已完成：
    run: streamvln-future-cat-48g-alloc6367298-20260609-220144
    output: /mnt/inspurfs/evla2_t/lizhen/checkpoints/StreamVLN/future_visual_tokens/streamvln-future-cat-48g-alloc6367298-20260609-220144
    per_device_train_batch_size=1, gradient_accumulation_steps=2, global_batch=96。
    这样和 48GPU no-future control 的 global batch=96 完全对齐。
-   current evidence: checkpoint-1000 / checkpoint-2000 已保存；checkpoint-2000 global_step=2000，loss=0.2762，adapter/non_lora 均存在。
+   current evidence: checkpoint-3000 / checkpoint-4000 / checkpoint-4988 已保存并完成 eval。
 4. 16GPU pending job 6387987 已取消；16GPU launcher 已删除。
 5. no-future continuation 的 checkpoint eval 已完成：
    job: 6389342
@@ -84,6 +91,13 @@ Stage 2 trainer state / proxy eval loss:
    logs: /mnt/hwfile/lizhen/StreamVLN/experiments/streamvln/future_visual_tokens/logs/no-future-cont-r2r-val-unseen-8g-6389342
    best: checkpoint-4000, SR=46.76, SPL=42.12, OS=52.75, NE=5.92。
    conclusion: official ckpt 用 old trajectory data 继续 LoRA 微调 1 epoch 本身会掉点，需作为 future ablation 的重要控制项。
+6. direct-cat future checkpoint eval 已完成：
+   run: future-cat-r2r-val-unseen-eval-alloc6367298-20260610-100331
+   checkpoints: checkpoint-3000, checkpoint-4000, checkpoint-4988
+   results: /mnt/inspurfs/evla2_t/lizhen/results/StreamVLN/future_visual_tokens/future-cat-r2r-val-unseen-eval-alloc6367298-20260610-100331
+   logs: /mnt/hwfile/lizhen/StreamVLN/experiments/streamvln/future_visual_tokens/logs/future-cat-r2r-val-unseen-eval-alloc6367298-20260610-100331
+   best: checkpoint-3000 by SPL, SR=45.24, SPL=40.49, OS=53.24, NE=6.13。
+   conclusion: direct-cat future 没有恢复性能，仍低于 no-future control。
 ```
 
 ## 排查假设
@@ -117,6 +131,7 @@ oracle future / shuffle future 等诊断放到下一轮。
 
 新增脚本:
   experiments/streamvln/future_visual_tokens/scripts/run_no_future_continuation_r2r_val_unseen_8gpu_eval.sbatch
+  experiments/streamvln/future_visual_tokens/scripts/run_future_direct_cat_r2r_val_unseen_eval_48gpu_alloc.sh
 ```
 
 ## 工作区注意
