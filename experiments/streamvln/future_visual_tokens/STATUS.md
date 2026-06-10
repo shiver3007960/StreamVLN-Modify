@@ -99,6 +99,11 @@ Stage 2 trainer state / proxy eval loss:
    best: checkpoint-3000 by SPL, SR=45.24, SPL=40.49, OS=53.24, NE=6.13。
    conclusion: direct-cat future 没有恢复性能，仍低于 no-future control。
 7. 临时 16GPU checkpoint-4000 加速探针结果/日志已删除；正式结果只保留 8GPU 三 ckpt eval。
+8. 4 个正式训练 run 的 offline wandb logs 已同步到 wandb project `streamvln-future`：
+   stage1 predictor: y2l4qbcm
+   gated future stage2: 2fr22x7m
+   no-future continuation: gjjzwmye
+   direct-cat future: buiwtzwd
 ```
 
 ## 排查假设
